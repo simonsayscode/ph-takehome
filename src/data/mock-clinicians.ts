@@ -60,6 +60,7 @@ function appointment(
 
 export const PSYCH_JANE_DOE_ID = "9c516382-c5b2-4677-a7ac-4e100fa35bdd";
 export const PSYCH_SECOND_ID = "2b5c8d1a-3e4f-4a6b-9c7d-1e2f3a4b5c6d";
+export const PSYCH_DENSE_ID = "6f9a2b3c-7d8e-4f0a-9b1c-2d3e4f5a6b7c";
 export const PSYCH_NON_MATCHING_ID = "3c6d9e2b-4f5a-4b7c-8d9e-2f3a4b5c6d7e";
 export const THERAPIST_UNSEEN_ID = "4d7e0f3c-5a6b-4c8d-9e0f-3a4b5c6d7e8f";
 export const THERAPIST_SEEN_ID = "5e8f1a4d-6b7c-4d9e-0f1a-4b5c6d7e8f90";
@@ -105,6 +106,38 @@ export const psychSecond: Clinician = {
   availableSlots: slotsForClinician(PSYCH_SECOND_ID, [
     { length: 90, date: "2024-09-02T16:00:00.000Z" },
     { length: 90, date: "2024-09-04T16:00:00.000Z" },
+  ]),
+  maxDailyAppointments: 3,
+  maxWeeklyAppointments: 10,
+  createdAt: FIXED_TS,
+  updatedAt: FIXED_TS,
+};
+
+/** A dense 15-min-cadence window of 90-min candidates, README-style. */
+function denseWindow(dayStart: string): RawSlot[] {
+  const start = parseISO(dayStart).getTime();
+  return Array.from({ length: 7 }, (_, i) => ({
+    length: 90,
+    date: new Date(start + i * 15 * 60_000).toISOString(),
+  }));
+}
+
+/**
+ * A matching NY/AETNA psychologist whose slots are two dense 15-min-cadence
+ * clusters (one per day) rather than already-sparse candidates — exercises
+ * Task 2's maximizer feeding into Task 1's cross-day pairing.
+ */
+export const psychDense: Clinician = {
+  id: PSYCH_DENSE_ID,
+  firstName: "Devon",
+  lastName: "Kim",
+  states: ["NY"],
+  insurances: ["AETNA"],
+  clinicianType: "PSYCHOLOGIST",
+  appointments: [],
+  availableSlots: slotsForClinician(PSYCH_DENSE_ID, [
+    ...denseWindow("2024-09-09T10:00:00.000Z"),
+    ...denseWindow("2024-09-11T14:00:00.000Z"),
   ]),
   maxDailyAppointments: 3,
   maxWeeklyAppointments: 10,
@@ -181,6 +214,7 @@ export const therapistSeen: Clinician = {
 export const MOCK_CLINICIANS: Clinician[] = [
   psychJaneDoe,
   psychSecond,
+  psychDense,
   psychNonMatching,
   therapistUnseen,
   therapistSeen,

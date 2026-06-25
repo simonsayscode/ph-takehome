@@ -1,6 +1,7 @@
 import { InMemoryClinicianRepository } from "../data/in-memory-clinician-repository";
 import {
   MOCK_CLINICIANS,
+  PSYCH_DENSE_ID,
   PSYCH_JANE_DOE_ID,
   PSYCH_SECOND_ID,
   THERAPIST_SEEN_ID,
@@ -18,7 +19,8 @@ describe("getAssessmentAvailability (Byrne, NY/AETNA)", () => {
 
     expect(ids).toContain(PSYCH_JANE_DOE_ID);
     expect(ids).toContain(PSYCH_SECOND_ID);
-    expect(ids).toHaveLength(2); // FL/BCBS psychologist excluded
+    expect(ids).toContain(PSYCH_DENSE_ID);
+    expect(ids).toHaveLength(3); // FL/BCBS psychologist excluded
     availability.forEach((a) => expect(a.pairs.length).toBeGreaterThan(0));
   });
 
@@ -33,6 +35,32 @@ describe("getAssessmentAvailability (Byrne, NY/AETNA)", () => {
         p.session2.date.toISOString() === "2024-08-19T12:00:00.000Z",
     );
     expect(usesOccupied).toBe(false);
+  });
+
+  it("only pairs the maximized (non-overlapping) subset of a dense 15-min-cadence clinician's slots", async () => {
+    const availability = await getAssessmentAvailability(patient, repo);
+    const dense = availability.find((a) => a.clinician.id === PSYCH_DENSE_ID)!;
+
+    // Each of the two days' 7 dense candidates collapses to exactly 2 survivors
+    // (the first and last of the fully-packed 90-min window), so cross-day
+    // pairing should yield exactly 2x2 = 4 pairs, never touching a discarded
+    // "middle" timestamp like 10:15 or 14:15.
+    expect(dense.pairs).toHaveLength(4);
+
+    const usedTimestamps = new Set(
+      dense.pairs.flatMap((p) => [
+        p.session1.date.toISOString(),
+        p.session2.date.toISOString(),
+      ]),
+    );
+    expect(usedTimestamps).toEqual(
+      new Set([
+        "2024-09-09T10:00:00.000Z",
+        "2024-09-09T11:30:00.000Z",
+        "2024-09-11T14:00:00.000Z",
+        "2024-09-11T15:30:00.000Z",
+      ]),
+    );
   });
 });
 

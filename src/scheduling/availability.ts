@@ -1,10 +1,13 @@
+import { startOfDay } from "date-fns";
+import { utc } from "@date-fns/utc";
 import { AvailableAppointmentSlot } from "../starter-code/appointment";
 import { Clinician } from "../starter-code/clinician";
 import { Patient } from "../starter-code/patient";
 import { ClinicianRepository } from "../data/clinician-repository";
 import { AssessmentPair, getAssessmentPairs } from "./assessment";
-import { ServiceType } from "./eligibility";
+import { SERVICE_RULES, ServiceType } from "./eligibility";
 import { filterUnoccupied } from "./occupancy";
+import { filterToMaxAppointments } from "./overlap";
 
 /** Assessment options for a single psychologist. */
 export interface ClinicianAssessmentAvailability {
@@ -16,6 +19,45 @@ export interface ClinicianAssessmentAvailability {
 export interface ClinicianTherapyAvailability {
   clinician: Clinician;
   slots: AvailableAppointmentSlot[];
+}
+
+/**
+ * Reduces a clinician's candidate slots to every one that's part of some
+ * maximum-cardinality non-overlapping selection (see overlap.ts), then maps
+ * the surviving timestamps back to their full slot objects.
+ */
+function maximizeSlots(
+  slots: AvailableAppointmentSlot[],
+  durationMins: number,
+): AvailableAppointmentSlot[] {
+  if (slots.length === 0) return [];
+  const byTimestamp = new Map(slots.map((slot) => [slot.date.getTime(), slot]));
+  return filterToMaxAppointments(slots.map((slot) => slot.date), durationMins).map(
+    (date) => byTimestamp.get(date.getTime())!,
+  );
+}
+
+/**
+ * Same as `maximizeSlots`, but computed independently per calendar day (UTC).
+ * Used for assessment pairing, where sessions are required to be on different
+ * days — each day's own local max is all that matters for that day's
+ * contribution to the cross-day pairing pool.
+ */
+function maximizeSlotsPerDay(
+  slots: AvailableAppointmentSlot[],
+  durationMins: number,
+): AvailableAppointmentSlot[] {
+  const byDay = new Map<number, AvailableAppointmentSlot[]>();
+  for (const slot of slots) {
+    const dayKey = startOfDay(slot.date, { in: utc }).getTime();
+    const group = byDay.get(dayKey);
+    if (group) {
+      group.push(slot);
+    } else {
+      byDay.set(dayKey, [slot]);
+    }
+  }
+  return [...byDay.values()].flatMap((daySlots) => maximizeSlots(daySlots, durationMins));
 }
 
 /**
@@ -33,11 +75,14 @@ export async function getAssessmentAvailability(
     "PSYCHOLOGIST_ASSESSMENT",
   );
 
+  const durationMins = SERVICE_RULES.PSYCHOLOGIST_ASSESSMENT.slotLengthMins;
+
   return clinicians
-    .map((clinician) => ({
-      clinician,
-      pairs: getAssessmentPairs(filterUnoccupied(clinician.availableSlots, clinician)),
-    }))
+    .map((clinician) => {
+      const unoccupied = filterUnoccupied(clinician.availableSlots, clinician);
+      const maximized = maximizeSlotsPerDay(unoccupied, durationMins);
+      return { clinician, pairs: getAssessmentPairs(maximized) };
+    })
     .filter((availability) => availability.pairs.length > 0);
 }
 
@@ -54,11 +99,12 @@ export async function getTherapyAvailability(
   service: Extract<ServiceType, "THERAPY_INTAKE" | "THERAPY_SIXTY_MINS">,
 ): Promise<ClinicianTherapyAvailability[]> {
   const clinicians = await repo.findEligibleClinicians(patient, service);
+  const durationMins = SERVICE_RULES[service].slotLengthMins;
 
   return clinicians
-    .map((clinician) => ({
-      clinician,
-      slots: filterUnoccupied(clinician.availableSlots, clinician),
-    }))
+    .map((clinician) => {
+      const unoccupied = filterUnoccupied(clinician.availableSlots, clinician);
+      return { clinician, slots: maximizeSlots(unoccupied, durationMins) };
+    })
     .filter((availability) => availability.slots.length > 0);
 }

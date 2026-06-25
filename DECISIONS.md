@@ -1,9 +1,5 @@
 # Decisions & Assumptions
 
-Where the README left room for interpretation, these are the choices this
-implementation makes. Task 1 covers assessment + therapy availability;
-Tasks 2 (slot optimization) and 3 (daily/weekly caps) build on it later.
-
 ## Services & clinician matching
 
 - **Three service types** (`src/scheduling/eligibility.ts`):
@@ -63,6 +59,43 @@ Tasks 2 (slot optimization) and 3 (daily/weekly caps) build on it later.
   clinicians the patient can actually book with.
 - Assessments are only ever offered as **pairs** — a first session with no
   possible follow-up within the window is never shown on its own.
+
+## Overlap maximization (Task 2)
+
+- Clinicians often expose many overlapping candidate start times for the same
+  block of open time (e.g. 12:00, 12:15, ... 13:30 at 15-min cadence, all
+  competing for the same 90 minutes). `src/scheduling/overlap.ts` filters these
+  down before they're offered, so we never show a slot whose booking would
+  needlessly shrink the clinician's achievable appointment count for that
+  stretch of time.
+- **Single-chain greedy vs. forward/backward DP — DP adopted.** The textbook
+  greedy (sort ascending, sweep with a cursor, keep if `start >= cursor`)
+  returns *one* canonical maximum-count chain. We instead return **every slot
+  that belongs to *some* maximum-cardinality solution**, via forward/backward
+  DP (the standard "is this element part of some optimal solution" technique).
+  Both approaches are `O(n log n)` (dominated by the initial sort) — this is a
+  **behavior choice, not a performance tradeoff**. The DP version surfaces
+  ties the simple greedy would arbitrarily discard (e.g. two widely-separated
+  clusters, where which member of each is kept doesn't change the achievable
+  total — the greedy silently keeps only the earliest of each, the DP version
+  keeps all of them) at no extra asymptotic cost, and is confirmed identical to
+  the greedy's result on the README's own example (no real tie exists there).
+  We never enumerate *combinations* of slots (which would be combinatorial) —
+  only test each slot's membership in some optimal solution independently.
+- **Continuous sweep, not bucketed by calendar day**, when computing a
+  therapist's single-slot availability (`maximizeSlots`): a slot starting near
+  midnight genuinely overlaps into the next calendar day, and bucketing by day
+  could incorrectly let two really-overlapping slots both survive.
+- **Computed per calendar day (UTC) for assessment pairing**
+  (`maximizeSlotsPerDay`): assessment sessions are required to be on different
+  days, so each day's maximized candidate pool is independent of every other
+  day's — grouping by day here is a safe convenience (not a correctness risk)
+  specifically because the cross-day pairing step that follows never needs two
+  same-day slots to interact with each other.
+- Maximization runs **after** occupancy filtering (real bookings must be
+  removed first — they aren't "candidates" to optimize over) and **before**
+  assessment pairing (which slots survive on one day changes which partners
+  are reachable on another).
 
 ## Data layer
 
