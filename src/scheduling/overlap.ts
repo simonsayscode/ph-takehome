@@ -18,12 +18,21 @@
  * test each slot's membership in some optimal solution independently — so
  * this stays O(n log n), dominated by the initial sort, with no combinatorial
  * blow-up.
+ *
+ * `target` caps how many appointments we're optimizing for — used by Task 3 to
+ * pass a clinician's remaining capacity. We then keep every slot usable in some
+ * selection of size `min(K, target)` rather than the full max `K`. At
+ * `target = 1` every slot qualifies (no pruning); at `target >= K` (the
+ * default, `Infinity`) it's the plain max-cardinality filter. A smaller target
+ * only ever keeps *more* slots — the keep-test is monotonic in the threshold —
+ * so capacity never hides a slot, it only relaxes pruning.
  */
 export function filterToMaxAppointments(
   dates: Date[],
   durationMins: number,
+  target: number = Infinity,
 ): Date[] {
-  if (dates.length === 0) return [];
+  if (dates.length === 0 || target <= 0) return [];
 
   const sorted = [...dates].sort((a, b) => a.getTime() - b.getTime());
   const n = sorted.length;
@@ -61,6 +70,8 @@ export function filterToMaxAppointments(
     F[i + 1] = Math.max(F[i], F[predecessor[i] + 1] + 1);
   }
   const max = F[n];
+  // Optimize toward at most `target` appointments — capacity may cap us below K.
+  const goal = Math.min(max, target);
 
   // B[m] = max non-overlapping count achievable using only slots m..n-1.
   const B = new Array<number>(n + 1).fill(0);
@@ -68,9 +79,11 @@ export function filterToMaxAppointments(
     B[i] = Math.max(B[i + 1], 1 + B[successor[i]]);
   }
 
-  // Slot i belongs to some maximum-cardinality solution iff using its best
-  // compatible predecessor and successor still reaches the global max.
+  // Slot i is offerable iff a selection that includes it can reach the goal:
+  // its best compatible predecessor chain + itself + best successor chain.
+  // (>= rather than ==: when goal < max, any slot in a goal-sized selection
+  // qualifies, not only those in a maximum one.)
   return sorted.filter(
-    (_, i) => F[predecessor[i] + 1] + 1 + B[successor[i]] === max,
+    (_, i) => F[predecessor[i] + 1] + 1 + B[successor[i]] >= goal,
   );
 }

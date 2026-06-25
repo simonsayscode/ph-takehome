@@ -78,12 +78,13 @@
   the greedy's result on the README's own example (no real tie exists there).
   We never enumerate *combinations* of slots (which would be combinatorial) —
   only test each slot's membership in some optimal solution independently.
-- **One `maximizeSlots`, run on the full candidate list (not bucketed by
-  calendar day)**, for both therapy availability and assessment pairing. A
-  per-day-bucketed variant was considered for assessment pairing (sessions
-  must land on different days), but a single global pass is simpler and
-  behaves identically *given* the no-midnight-crossing assumption below — see
-  that bullet for what we'd reconsider if it didn't hold.
+- **Grouped by calendar day** (`bookableSlots`). Task 2 originally ran one
+  global pass over a clinician's whole slot list; Task 3 switched to one
+  maximizer call per UTC day because the capacity target (see "Capacity caps")
+  is per-day. The two are equivalent under the no-midnight-crossing assumption
+  below (different days never overlap, so each day optimizes independently) —
+  per-day grouping doesn't add any boundary handling, it's just the grouping
+  that lets each day carry its own capacity target.
 - Maximization runs **after** occupancy filtering (real bookings must be
   removed first — they aren't "candidates" to optimize over) and **before**
   assessment pairing (which slots survive changes which partners are
@@ -96,6 +97,46 @@
   same-physical-time overlap guard to `getAssessmentPairs` regardless. We
   didn't generalize further — if midnight-crossing slots become real, that
   needs product input on intended behavior, not just an engineering fix.
+
+## Capacity caps (Task 3)
+
+`src/scheduling/capacity.ts` (`CapacityCalendar`) enforces each clinician's
+`maxDailyAppointments` / `maxWeeklyAppointments`.
+
+- **Hard gates.** A day with `bookedThatDay ≥ maxDaily` (or whose ISO week has
+  `bookedThatWeek ≥ maxWeekly`) offers no slots — implemented as
+  `effectiveRemainingOnDay = min(remainingDay, remainingWeek)`; a day with
+  `effectiveRemaining ≤ 0` is dropped entirely.
+- **Statuses that count toward a cap** = `UPCOMING`, `OCCURRED`, `NO_SHOW` —
+  the same set occupancy uses (a no-show still consumed a booked slot).
+  `CANCELLED`, `RE_SCHEDULED`, and `LATE_CANCELLATION` don't count.
+- **The maximizer is capacity-aware.** Its target is `min(K, effectiveRemaining)`
+  rather than the full daily max `K`. The maximizer protects *throughput* (don't
+  let a booking needlessly block other appointments) — but that only matters up
+  to how many the clinician can still take. So when a day has room for only 1
+  more, *every* slot is offered (no pruning); with `≥ K` room it's the full Task
+  2 maximize; in between it keeps every slot usable in some `remaining`-sized
+  booking. This shows strictly more options than always pruning toward `K`, with
+  no capacity waste — chosen over a binary "skip maximize when remaining == 1."
+  Because the keep-test is **monotonic in the target** (smaller target ⇒
+  superset of slots), capacity *never hides* a slot via the maximizer; it only
+  relaxes pruning.
+- **An assessment counts as two appointments, not one booking.** Assumption: the
+  caps count individual *sessions*, so one assessment consumes 2 toward the caps
+  (1 per session-day; 2 in a shared week) — not 1 "assessment booking." A pair is
+  offered only if both sessions fit: each day needs ≥1 (guaranteed by the per-day
+  gate) and a **same-ISO-week** pair needs the week to have **≥2** remaining.
+  **Cross-week** pairs charge 1 to each of two weeks, which the per-day gate
+  already guaranteed — so the pair filter checks *only* the same-week case.
+  Applying `≥2` across weeks would be a bug (it would wrongly drop a valid
+  `1 + 1` cross-week pair). Net effect: a week with only 1 slot left offers no
+  same-week assessment but can still anchor a cross-week one.
+- **Why the per-day maximize and the same-week pair check don't conflict:** the
+  only two places capacity removes options are the per-day gate
+  (`effectiveRemaining ≤ 0`) and the same-week pair filter (`remainingInWeek < 2`).
+  Since `effectiveRemaining ≥ 1` implies `remainingWeek ≥ 1`, every surviving
+  slot already sits in a week with room for its single session — so cross-week
+  pairs and the daily dimension need no further checks.
 
 ## Robustness / hardening
 

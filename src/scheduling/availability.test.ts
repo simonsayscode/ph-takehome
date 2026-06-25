@@ -1,5 +1,9 @@
-import { AvailableAppointmentSlot } from "../starter-code/appointment";
-import { Clinician } from "../starter-code/clinician";
+import {
+  Appointment,
+  AppointmentType,
+  AvailableAppointmentSlot,
+} from "../starter-code/appointment";
+import { Clinician, ClinicianType } from "../starter-code/clinician";
 import { InMemoryClinicianRepository } from "../data/in-memory-clinician-repository";
 import {
   MOCK_CLINICIANS,
@@ -124,5 +128,190 @@ describe("availability hardening", () => {
     const availability = await getTherapyAvailability(patient, r, "THERAPY_INTAKE");
 
     expect(availability[0].slots).toHaveLength(1);
+  });
+});
+
+describe("capacity caps (Task 3)", () => {
+  const OTHER_PATIENT = "another-patient-uuid"; // keeps Byrne eligible (no prior relationship)
+
+  const slot = (date: string, length: number): AvailableAppointmentSlot => ({
+    id: `slot:${date}`,
+    clinicianId: "c",
+    date: new Date(date),
+    length,
+    createdAt: new Date(date),
+    updatedAt: new Date(date),
+  });
+
+  const booked = (date: string, type: AppointmentType): Appointment => ({
+    id: `appt:${date}`,
+    patientId: OTHER_PATIENT,
+    clinicianId: "c",
+    scheduledFor: new Date(date),
+    appointmentType: type,
+    status: "UPCOMING",
+    createdAt: new Date(date),
+    updatedAt: new Date(date),
+  });
+
+  const clinician = (opts: {
+    type: ClinicianType;
+    slots: AvailableAppointmentSlot[];
+    appointments?: Appointment[];
+    maxDaily: number;
+    maxWeekly: number;
+  }): Clinician => ({
+    id: "c",
+    firstName: "Test",
+    lastName: "Clinician",
+    states: ["NY"],
+    insurances: ["AETNA"],
+    clinicianType: opts.type,
+    appointments: opts.appointments ?? [],
+    availableSlots: opts.slots,
+    maxDailyAppointments: opts.maxDaily,
+    maxWeeklyAppointments: opts.maxWeekly,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const therapyIntake = (c: Clinician) =>
+    getTherapyAvailability(patient, new InMemoryClinicianRepository([c]), "THERAPY_INTAKE");
+  const assessment = (c: Clinician) =>
+    getAssessmentAvailability(patient, new InMemoryClinicianRepository([c]));
+  const isoStarts = (slots: AvailableAppointmentSlot[]) =>
+    slots.map((s) => s.date.toISOString()).sort();
+
+  it("shows no slots on a day already at maxDaily", async () => {
+    // 2024-09-02 has 2 non-overlapping bookings; maxDaily = 2 -> day is full.
+    const c = clinician({
+      type: "THERAPIST",
+      maxDaily: 2,
+      maxWeekly: 20,
+      appointments: [
+        booked("2024-09-02T09:00:00.000Z", "THERAPY_INTAKE"),
+        booked("2024-09-02T11:00:00.000Z", "THERAPY_INTAKE"),
+      ],
+      slots: [
+        slot("2024-09-02T14:00:00.000Z", 60), // full day -> dropped by capacity
+        slot("2024-09-03T14:00:00.000Z", 60), // next day open -> kept
+      ],
+    });
+
+    const [{ slots }] = await therapyIntake(c);
+    expect(isoStarts(slots)).toEqual(["2024-09-03T14:00:00.000Z"]);
+  });
+
+  it("shows no slots in a week already at maxWeekly", async () => {
+    // Two bookings in the ISO week of 2024-09-02; maxWeekly = 2 -> week is full.
+    const c = clinician({
+      type: "THERAPIST",
+      maxDaily: 5,
+      maxWeekly: 2,
+      appointments: [
+        booked("2024-09-02T09:00:00.000Z", "THERAPY_INTAKE"),
+        booked("2024-09-03T09:00:00.000Z", "THERAPY_INTAKE"),
+      ],
+      slots: [
+        slot("2024-09-04T14:00:00.000Z", 60), // same week -> dropped
+        slot("2024-09-09T14:00:00.000Z", 60), // next week -> kept
+      ],
+    });
+
+    const [{ slots }] = await therapyIntake(c);
+    expect(isoStarts(slots)).toEqual(["2024-09-09T14:00:00.000Z"]);
+  });
+
+  it("stops pruning overlaps when a day has room for only 1 more (maximize no-op)", async () => {
+    // 14:00/14:30/15:00 (60-min): K = 2, and full-maximize would drop 14:30.
+    // With 1 booking already and maxDaily = 2, remaining = 1 -> show all three.
+    const c = clinician({
+      type: "THERAPIST",
+      maxDaily: 2,
+      maxWeekly: 20,
+      appointments: [booked("2024-09-02T09:00:00.000Z", "THERAPY_INTAKE")],
+      slots: [
+        slot("2024-09-02T14:00:00.000Z", 60),
+        slot("2024-09-02T14:30:00.000Z", 60),
+        slot("2024-09-02T15:00:00.000Z", 60),
+      ],
+    });
+
+    const [{ slots }] = await therapyIntake(c);
+    expect(isoStarts(slots)).toEqual([
+      "2024-09-02T14:00:00.000Z",
+      "2024-09-02T14:30:00.000Z",
+      "2024-09-02T15:00:00.000Z",
+    ]);
+  });
+
+  it("offers a slot full-maximize would hide when 1 < remaining < K", async () => {
+    // 09:00/10:00/10:30/11:00 (60-min): K = 3, 10:30 is a trap (in no size-3
+    // selection). 1 booking + maxDaily 3 -> remaining 2 -> 10:30 is offered.
+    const c = clinician({
+      type: "THERAPIST",
+      maxDaily: 3,
+      maxWeekly: 20,
+      appointments: [booked("2024-09-02T13:00:00.000Z", "THERAPY_INTAKE")],
+      slots: [
+        slot("2024-09-02T09:00:00.000Z", 60),
+        slot("2024-09-02T10:00:00.000Z", 60),
+        slot("2024-09-02T10:30:00.000Z", 60),
+        slot("2024-09-02T11:00:00.000Z", 60),
+      ],
+    });
+
+    const [{ slots }] = await therapyIntake(c);
+    expect(isoStarts(slots)).toContain("2024-09-02T10:30:00.000Z");
+    expect(slots).toHaveLength(4);
+  });
+
+  it("allows a same-week assessment pair when the week has room for 2", async () => {
+    const c = clinician({
+      type: "PSYCHOLOGIST",
+      maxDaily: 2,
+      maxWeekly: 2, // exactly enough for both sessions
+      slots: [
+        slot("2024-09-02T16:00:00.000Z", 90), // Mon
+        slot("2024-09-04T16:00:00.000Z", 90), // Wed, same ISO week
+      ],
+    });
+
+    const [{ pairs }] = await assessment(c);
+    expect(pairs).toHaveLength(1);
+  });
+
+  it("drops a same-week assessment pair when the week has room for only 1", async () => {
+    // One booking that week -> remainingInWeek = 1; an assessment needs 2.
+    const c = clinician({
+      type: "PSYCHOLOGIST",
+      maxDaily: 2,
+      maxWeekly: 2,
+      appointments: [booked("2024-09-03T09:00:00.000Z", "ASSESSMENT_SESSION_1")],
+      slots: [
+        slot("2024-09-02T16:00:00.000Z", 90), // Mon, same week
+        slot("2024-09-04T16:00:00.000Z", 90), // Wed, same week
+      ],
+    });
+
+    expect(await assessment(c)).toEqual([]); // no offerable pair -> clinician omitted
+  });
+
+  it("allows a cross-week assessment pair when each week has room for 1", async () => {
+    // maxWeekly = 1: each week individually allows the one session charged to it.
+    const c = clinician({
+      type: "PSYCHOLOGIST",
+      maxDaily: 2,
+      maxWeekly: 1,
+      slots: [
+        slot("2024-09-06T16:00:00.000Z", 90), // Fri, week A
+        slot("2024-09-09T16:00:00.000Z", 90), // Mon, week B (3 days later, ≤7)
+      ],
+    });
+
+    const [{ pairs }] = await assessment(c);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].session1.date.toISOString()).toBe("2024-09-06T16:00:00.000Z");
+    expect(pairs[0].session2.date.toISOString()).toBe("2024-09-09T16:00:00.000Z");
   });
 });

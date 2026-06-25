@@ -70,4 +70,42 @@ describe("filterToMaxAppointments", () => {
       iso([clusterA1, clusterA2, clusterB1, clusterB2]).sort(),
     );
   });
+
+  describe("capacity target", () => {
+    // 09:00, 10:00, 10:30, 12:00 (90-min). Max non-overlapping K = 3
+    // (09:00 + 10:30 + 12:00). 10:00 is a "trap": its best schedule is only
+    // 2 appointments (10:00 + 12:00), so it's in no size-3 selection.
+    const dates = [
+      "2024-08-19T09:00:00.000Z",
+      "2024-08-19T10:00:00.000Z",
+      "2024-08-19T10:30:00.000Z",
+      "2024-08-19T12:00:00.000Z",
+    ].map((d) => parseISO(d));
+
+    it("drops the trap slot at full max (default target = K)", () => {
+      const result = iso(filterToMaxAppointments(dates, 90));
+      expect(result).not.toContain("2024-08-19T10:00:00.000Z");
+      expect(result).toHaveLength(3);
+    });
+
+    it("keeps the trap slot when capacity only allows 2 (1 < target < K)", () => {
+      const result = iso(filterToMaxAppointments(dates, 90, 2));
+      expect(result).toContain("2024-08-19T10:00:00.000Z");
+      expect(result).toHaveLength(4); // every slot is usable in some 2-booking day
+    });
+
+    it("keeps every slot when capacity allows only 1", () => {
+      expect(filterToMaxAppointments(dates, 90, 1)).toHaveLength(4);
+    });
+
+    it("returns nothing when capacity is 0", () => {
+      expect(filterToMaxAppointments(dates, 90, 0)).toEqual([]);
+    });
+
+    it("behaves like the default when target >= K", () => {
+      expect(iso(filterToMaxAppointments(dates, 90, 99))).toEqual(
+        iso(filterToMaxAppointments(dates, 90)),
+      );
+    });
+  });
 });
