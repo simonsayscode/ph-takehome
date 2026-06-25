@@ -1,21 +1,7 @@
 import { addMinutes, areIntervalsOverlapping, Interval } from "date-fns";
-import {
-  AppointmentType,
-  AvailableAppointmentSlot,
-} from "../starter-code/appointment";
+import { AvailableAppointmentSlot } from "../starter-code/appointment";
 import { Clinician } from "../starter-code/clinician";
-
-/** Minutes a booked appointment of the given type occupies on the calendar. */
-export function appointmentDurationMins(type: AppointmentType): number {
-  switch (type) {
-    case "ASSESSMENT_SESSION_1":
-    case "ASSESSMENT_SESSION_2":
-      return 90;
-    case "THERAPY_INTAKE":
-    case "THERAPY_SIXTY_MINS":
-      return 60;
-  }
-}
+import { appointmentDurationMins } from "./eligibility";
 
 /**
  * Statuses whose appointments actually occupy time on the clinician's calendar.

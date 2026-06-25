@@ -1,3 +1,4 @@
+import { AppointmentType } from "../starter-code/appointment";
 import { Clinician, ClinicianType } from "../starter-code/clinician";
 import { Patient } from "../starter-code/patient";
 
@@ -50,6 +51,20 @@ export const SERVICE_RULES: Record<ServiceType, ServiceRule> = {
     requiresExistingRelationship: true,
   },
 };
+
+/** Which service an appointment type was booked under — `SERVICE_RULES` is
+ * the single source of truth for that service's duration. */
+const APPOINTMENT_TYPE_SERVICE: Record<AppointmentType, ServiceType> = {
+  ASSESSMENT_SESSION_1: "PSYCHOLOGIST_ASSESSMENT",
+  ASSESSMENT_SESSION_2: "PSYCHOLOGIST_ASSESSMENT",
+  THERAPY_INTAKE: "THERAPY_INTAKE",
+  THERAPY_SIXTY_MINS: "THERAPY_SIXTY_MINS",
+};
+
+/** Minutes a booked appointment of the given type occupies on the calendar. */
+export function appointmentDurationMins(type: AppointmentType): number {
+  return SERVICE_RULES[APPOINTMENT_TYPE_SERVICE[type]].slotLengthMins;
+}
 
 /**
  * Statuses that make someone an established patient of a clinician: they either
