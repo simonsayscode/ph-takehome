@@ -1,14 +1,7 @@
 import { startOfDay, startOfISOWeek } from "date-fns";
 import { utc } from "@date-fns/utc";
 import { Clinician } from "../starter-code/clinician";
-
-/**
- * Appointment statuses that count toward a clinician's daily/weekly caps — the
- * same set that occupies time on the calendar (see occupancy.ts). A booking
- * that was cancelled, rescheduled, or late-cancelled is not counted; a no-show
- * still consumed a booked slot, so it counts.
- */
-const COUNTS_TOWARD_CAP = new Set(["UPCOMING", "OCCURRED", "NO_SHOW"]);
+import { ACTIVE_APPOINTMENT_STATUSES } from "./appointment-status";
 
 const dayKey = (date: Date): number => startOfDay(date, { in: utc }).getTime();
 const weekKey = (date: Date): number => startOfISOWeek(date, { in: utc }).getTime();
@@ -26,7 +19,7 @@ export class CapacityCalendar {
 
   constructor(private readonly clinician: Clinician) {
     for (const appt of clinician.appointments) {
-      if (!COUNTS_TOWARD_CAP.has(appt.status)) continue;
+      if (!ACTIVE_APPOINTMENT_STATUSES.has(appt.status)) continue; // only live bookings count
       const d = dayKey(appt.scheduledFor);
       const w = weekKey(appt.scheduledFor);
       this.bookedPerDay.set(d, (this.bookedPerDay.get(d) ?? 0) + 1);

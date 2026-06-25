@@ -1,18 +1,13 @@
 import { addMinutes, areIntervalsOverlapping, Interval } from "date-fns";
 import { AvailableAppointmentSlot } from "../starter-code/appointment";
 import { Clinician } from "../starter-code/clinician";
+import { ACTIVE_APPOINTMENT_STATUSES } from "./appointment-status";
 import { appointmentDurationMins } from "./eligibility";
 
-/**
- * Statuses whose appointments actually occupy time on the clinician's calendar.
- * Cancelled / rescheduled appointments free the slot back up.
- */
-const OCCUPYING_STATUSES = new Set(["UPCOMING", "OCCURRED", "NO_SHOW"]);
-
-/** Time intervals already taken on the clinician's calendar. */
+/** Time intervals already taken on the clinician's calendar by live bookings. */
 export function occupyingIntervals(clinician: Clinician): Interval[] {
   return clinician.appointments
-    .filter((appt) => OCCUPYING_STATUSES.has(appt.status))
+    .filter((appt) => ACTIVE_APPOINTMENT_STATUSES.has(appt.status))
     .map((appt) => ({
       start: appt.scheduledFor,
       end: addMinutes(appt.scheduledFor, appointmentDurationMins(appt.appointmentType)),

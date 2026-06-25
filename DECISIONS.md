@@ -1,19 +1,12 @@
 # Decisions & Assumptions
 
-## Services & clinician matching
+## Prior-relationship rule (assumption beyond the prompt)
 
-- **Three service types** (`src/scheduling/eligibility.ts`):
-  - `PSYCHOLOGIST_ASSESSMENT` — PSYCHOLOGIST, two 90-min sessions (offered as pairs).
-  - `THERAPY_INTAKE` — THERAPIST, one 60-min session.
-  - `THERAPY_SIXTY_MINS` — THERAPIST, one 60-min session.
-- A patient is only matched to a clinician who **operates in their state** and
-  **accepts their insurance** (per the README) and is the **right clinician
-  type** for the service.
-
-## Prior-relationship rule (intake vs. ongoing)
-
-- Booking is **per-clinician and one-time** for new-patient services. The
-  prior-appointment requirement **flips by service**:
+- The prompt is centered on new patients scheduling online. I interpreted the
+  "first therapy session" as a per-clinician new-patient intake, and modeled
+  recurring therapy separately even though it is not patient-facing online.
+- Under that assumption, booking is **per-clinician and one-time** for
+  new-patient services. The prior-appointment requirement **flips by service**:
   - `PSYCHOLOGIST_ASSESSMENT` & `THERAPY_INTAKE` require **no prior appointment**
     with that clinician — you can't book a first intake/assessment with someone
     you've already seen.
@@ -23,15 +16,13 @@
   `UPCOMING` or `OCCURRED`. `CANCELLED`, `NO_SHOW`, `LATE_CANCELLATION` and
   `RE_SCHEDULED` do **not** establish a relationship.
 - **Why `THERAPY_SIXTY_MINS` at all?** The README says recurring therapy is
-  booked offline (in-session/by chat), not via patient self-scheduling. We still
-  model it so a **therapist booking their own recurring session** reuses this
-  exact logic and can't book the wrong-coded appointment type (e.g. an intake
-  for an existing patient, or a sixty-mins for someone with no relationship).
+  booked offline (in-session/by chat), not via patient self-scheduling. I still
+  included it to keep the domain model complete and to show how the same
+  eligibility/capacity logic would apply if internal scheduling reused this
+  module.
 
 ## Existing appointments / occupancy
 
-- Returned slots exclude any that **overlap an already-booked appointment** for
-  that clinician (`src/scheduling/occupancy.ts`).
 - An appointment occupies time only when its status is `UPCOMING`, `OCCURRED`,
   or `NO_SHOW`. `CANCELLED`, `RE_SCHEDULED`, and `LATE_CANCELLATION` free the slot.
 
@@ -45,25 +36,10 @@
   bound is **inclusive**: booking on a Wednesday surfaces options up to and
   including the following Wednesday. Verified against the README, whose expected
   output includes the `2024-08-21 ↔ 2024-08-28` pair (exactly 7 days).
-- Pairs are ordered so `session1` is always earlier than `session2`.
-- A week (for Task 3's `maxWeeklyAppointments`) is an **ISO week, Mon–Sun**.
-
-## Output shape
-
-- Results are **grouped by clinician**. Clinicians with **no offerable options**
-  (no valid pair, or every slot occupied) are **omitted**, so a caller only sees
-  clinicians the patient can actually book with.
-- Assessments are only ever offered as **pairs** — a first session with no
-  possible follow-up within the window is never shown on its own.
+- A week is an **ISO week, Mon–Sun**.
 
 ## Overlap maximization (Task 2)
 
-- Clinicians often expose many overlapping candidate start times for the same
-  block of open time (e.g. 12:00, 12:15, ... 13:30 at 15-min cadence, all
-  competing for the same 90 minutes). `src/scheduling/overlap.ts` filters these
-  down before they're offered, so we never show a slot whose booking would
-  needlessly shrink the clinician's achievable appointment count for that
-  stretch of time.
 - **Single-chain greedy vs. forward/backward DP — DP adopted.** The textbook
   greedy (sort ascending, sweep with a cursor, keep if `start >= cursor`)
   returns *one* canonical maximum-count chain. We instead return **every slot
@@ -78,17 +54,6 @@
   the greedy's result on the README's own example (no real tie exists there).
   We never enumerate *combinations* of slots (which would be combinatorial) —
   only test each slot's membership in some optimal solution independently.
-- **Grouped by calendar day** (`bookableSlots`). Task 2 originally ran one
-  global pass over a clinician's whole slot list; Task 3 switched to one
-  maximizer call per UTC day because the capacity target (see "Capacity caps")
-  is per-day. The two are equivalent under the no-midnight-crossing assumption
-  below (different days never overlap, so each day optimizes independently) —
-  per-day grouping doesn't add any boundary handling, it's just the grouping
-  that lets each day carry its own capacity target.
-- Maximization runs **after** occupancy filtering (real bookings must be
-  removed first — they aren't "candidates" to optimize over) and **before**
-  assessment pairing (which slots survive changes which partners are
-  reachable).
 - **Assumption: no slot crosses midnight** (a slot's `date + length` never
   spills into the next calendar day) — true for `MOCK_SLOT_DATA` (latest start
   22:30 UTC, ending exactly at 00:00), but not a derived fact. We explored what
@@ -103,10 +68,6 @@
 `src/scheduling/capacity.ts` (`CapacityCalendar`) enforces each clinician's
 `maxDailyAppointments` / `maxWeeklyAppointments`.
 
-- **Hard gates.** A day with `bookedThatDay ≥ maxDaily` (or whose ISO week has
-  `bookedThatWeek ≥ maxWeekly`) offers no slots — implemented as
-  `effectiveRemainingOnDay = min(remainingDay, remainingWeek)`; a day with
-  `effectiveRemaining ≤ 0` is dropped entirely.
 - **Statuses that count toward a cap** = `UPCOMING`, `OCCURRED`, `NO_SHOW` —
   the same set occupancy uses (a no-show still consumed a booked slot).
   `CANCELLED`, `RE_SCHEDULED`, and `LATE_CANCELLATION` don't count.
@@ -131,12 +92,6 @@
   Applying `≥2` across weeks would be a bug (it would wrongly drop a valid
   `1 + 1` cross-week pair). Net effect: a week with only 1 slot left offers no
   same-week assessment but can still anchor a cross-week one.
-- **Why the per-day maximize and the same-week pair check don't conflict:** the
-  only two places capacity removes options are the per-day gate
-  (`effectiveRemaining ≤ 0`) and the same-week pair filter (`remainingInWeek < 2`).
-  Since `effectiveRemaining ≥ 1` implies `remainingWeek ≥ 1`, every surviving
-  slot already sits in a week with room for its single session — so cross-week
-  pairs and the daily dimension need no further checks.
 
 ## Robustness / hardening
 
@@ -146,15 +101,6 @@
   `RE_SCHEDULED` means no care relationship actually formed — they never
   onboarded — so they remain a new-patient (intake/assessment) candidate and
   cannot book ongoing (`THERAPY_SIXTY_MINS`) sessions.
-- **Duplicate same-timestamp slots** are collapsed to a single offering: a
-  clinician can't hold two appointments starting at the same instant, so
-  `bookableSlots` dedupes by start time before optimizing.
-- **We trust the README's slot-length invariant** — a 90-min slot means a
-  psychologist, a 60-min slot means a therapist — and pass the service's
-  duration to the maximizer rather than defensively re-filtering each
-  clinician's slots by length. (An earlier version dropped mismatched-length
-  slots as bad data; removed in favor of simpler code that relies on the
-  invariant.)
 - **Past slots are not filtered.** A production system would pass the current
   time (a `now`) into the availability entry points and exclude slots starting
   at or before it (a slot already underway can't be booked). We deliberately

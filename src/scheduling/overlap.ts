@@ -69,9 +69,9 @@ export function filterToMaxAppointments(
   for (let i = 0; i < n; i++) {
     F[i + 1] = Math.max(F[i], F[predecessor[i] + 1] + 1);
   }
-  const max = F[n];
+  const maxCount = F[n]; // K: the most non-overlapping appointments the day can fit
   // Optimize toward at most `target` appointments — capacity may cap us below K.
-  const goal = Math.min(max, target);
+  const goal = Math.min(maxCount, target);
 
   // B[m] = max non-overlapping count achievable using only slots m..n-1.
   const B = new Array<number>(n + 1).fill(0);
@@ -81,8 +81,8 @@ export function filterToMaxAppointments(
 
   // Slot i is offerable iff a selection that includes it can reach the goal:
   // its best compatible predecessor chain + itself + best successor chain.
-  // (>= rather than ==: when goal < max, any slot in a goal-sized selection
-  // qualifies, not only those in a maximum one.)
+  // (>= rather than ==: when goal < maxCount, any slot in a goal-sized
+  // selection qualifies, not only those in a maximum one.)
   return sorted.filter(
     (_, i) => F[predecessor[i] + 1] + 1 + B[successor[i]] >= goal,
   );
