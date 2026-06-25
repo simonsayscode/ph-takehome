@@ -126,6 +126,7 @@ tie exists.
 | [`overlap.ts`](src/scheduling/overlap.ts) | Maximize bookable appointments (Task 2) |
 | [`capacity.ts`](src/scheduling/capacity.ts) | Daily/weekly caps (Task 3) |
 | [`assessment.ts`](src/scheduling/assessment.ts) | Pair two assessment sessions |
+| [`appointment-status.ts`](src/scheduling/appointment-status.ts) | Shared constant: which statuses count as a live booking |
 | [`availability.ts`](src/scheduling/availability.ts) | Public entry points; composes the pipeline |
 | [`data/clinician-repository.ts`](src/data/clinician-repository.ts) | The DB seam (interface) |
 | [`data/in-memory-clinician-repository.ts`](src/data/in-memory-clinician-repository.ts) | Test/demo implementation |
