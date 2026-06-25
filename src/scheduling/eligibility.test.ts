@@ -1,4 +1,4 @@
-import { Appointment } from "../starter-code/appointment";
+import { Appointment, AppointmentStatus } from "../starter-code/appointment";
 import { Clinician, ClinicianType } from "../starter-code/clinician";
 import { Patient } from "../starter-code/patient";
 import { isEligible } from "./eligibility";
@@ -73,12 +73,33 @@ describe("isEligible", () => {
       expect(isEligible(seen, patient, "THERAPY_SIXTY_MINS")).toBe(true);
     });
 
-    it("ignores a cancelled appointment when judging the relationship", () => {
-      const cancelled: Appointment = { ...priorAppointment, status: "CANCELLED" };
-      const therapist = clinician({ clinicianType: "THERAPIST", appointments: [cancelled] });
-      // No real relationship -> still an intake candidate, not a sixty-mins one.
+    // Only attendance (OCCURRED) or committed intent (UPCOMING) establishes a
+    // patient. A no-show/cancellation/reschedule means they never onboarded,
+    // so they stay an intake candidate and can't book ongoing therapy.
+    it.each<AppointmentStatus>([
+      "CANCELLED",
+      "RE_SCHEDULED",
+      "NO_SHOW",
+      "LATE_CANCELLATION",
+    ])("treats a %s appointment as no established relationship", (status) => {
+      const therapist = clinician({
+        clinicianType: "THERAPIST",
+        appointments: [{ ...priorAppointment, status }],
+      });
       expect(isEligible(therapist, patient, "THERAPY_INTAKE")).toBe(true);
       expect(isEligible(therapist, patient, "THERAPY_SIXTY_MINS")).toBe(false);
     });
+
+    it.each<AppointmentStatus>(["UPCOMING", "OCCURRED"])(
+      "treats a %s appointment as an established relationship",
+      (status) => {
+        const therapist = clinician({
+          clinicianType: "THERAPIST",
+          appointments: [{ ...priorAppointment, status }],
+        });
+        expect(isEligible(therapist, patient, "THERAPY_INTAKE")).toBe(false);
+        expect(isEligible(therapist, patient, "THERAPY_SIXTY_MINS")).toBe(true);
+      },
+    );
   });
 });

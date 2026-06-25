@@ -52,20 +52,19 @@ export const SERVICE_RULES: Record<ServiceType, ServiceRule> = {
 };
 
 /**
- * A cancelled/rescheduled appointment doesn't establish (or count as) a real
- * relationship between patient and clinician.
+ * Statuses that make someone an established patient of a clinician: they either
+ * attended (`OCCURRED`) or are committed to attending (`UPCOMING`). A
+ * `NO_SHOW`, `LATE_CANCELLATION`, `CANCELLED`, or `RE_SCHEDULED` means no care
+ * relationship was actually formed — they never onboarded — so they remain a
+ * new-patient (intake/assessment) candidate. See DECISIONS.md.
  */
-const RELATIONSHIP_ESTABLISHING_STATUSES = new Set([
-  "UPCOMING",
-  "OCCURRED",
-  "NO_SHOW",
-  "LATE_CANCELLATION",
-]);
+const RELATIONSHIP_ESTABLISHING_STATUSES = new Set(["UPCOMING", "OCCURRED"]);
 
 /**
- * True if the patient has any non-cancelled appointment with this clinician.
- * Used to distinguish a brand-new patient (intake/assessment) from an existing
- * one (ongoing therapy).
+ * True if the patient is an established patient of this clinician — i.e. has an
+ * attended or committed appointment with them (see
+ * `RELATIONSHIP_ESTABLISHING_STATUSES`). Used to distinguish a brand-new
+ * patient (intake/assessment) from an existing one (ongoing therapy).
  */
 export function hasSeenClinician(patient: Patient, clinician: Clinician): boolean {
   return clinician.appointments.some(

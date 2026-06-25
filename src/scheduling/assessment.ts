@@ -18,8 +18,10 @@ const MAX_DAYS_APART = 7;
 /**
  * Generates every valid pair of assessment sessions from one psychologist's
  * slots: different calendar days, between 1 and 7 days apart (inclusive, in
- * UTC). A slot with no valid partner never appears, so we never offer a first
- * session without a possible follow-up.
+ * UTC), and not overlapping in actual time (guards against a session1 that
+ * runs past midnight into session2's start). A slot with no valid partner
+ * never appears, so we never offer a first session without a possible
+ * follow-up.
  */
 export function getAssessmentPairs(
   slots: AvailableAppointmentSlot[],
@@ -35,7 +37,9 @@ export function getAssessmentPairs(
       // Sorted ascending, so daysApart is non-decreasing as j grows: once a
       // partner is too far out, every later one is too.
       if (daysApart > MAX_DAYS_APART) break;
-      if (daysApart >= MIN_DAYS_APART) {
+      const session1End = sorted[i].date.getTime() + sorted[i].length * 60_000;
+      const overlapsSession1 = session1End > sorted[j].date.getTime();
+      if (daysApart >= MIN_DAYS_APART && !overlapsSession1) {
         pairs.push({ session1: sorted[i], session2: sorted[j] });
       }
     }

@@ -20,7 +20,7 @@
   - `THERAPY_SIXTY_MINS` requires an **existing relationship** (a prior
     appointment) — it's ongoing therapy.
 - "Has the patient seen this clinician?" counts any appointment with statuses
-  `UPCOMING`, `OCCURRED`, `NO_SHOW`, or `LATE_CANCELLATION`. `CANCELLED` and
+  `UPCOMING` or `OCCURRED`. `CANCELLED`, `NO_SHOW`, `LATE_CANCELLATION` and
   `RE_SCHEDULED` do **not** establish a relationship.
 - **Why `THERAPY_SIXTY_MINS` at all?** The README says recurring therapy is
   booked offline (in-session/by chat), not via patient self-scheduling. We still
@@ -34,16 +34,12 @@
   that clinician (`src/scheduling/occupancy.ts`).
 - An appointment occupies time only when its status is `UPCOMING`, `OCCURRED`,
   or `NO_SHOW`. `CANCELLED`, `RE_SCHEDULED`, and `LATE_CANCELLATION` free the slot.
-- An appointment's **duration is inferred from its type**: 90 min for
-  `ASSESSMENT_SESSION_*`, 60 min for `THERAPY_*`.
-- Overlap is **exclusive** of the shared boundary: a slot starting exactly when
-  an appointment ends is bookable (back-to-back is fine).
 
 ## Dates & the 7-day rule
 
 - All day/week math is done in **UTC** (slot `date`s are UTC). For ease of demo
-  we do **not** localize to the clinician's or patient's timezone. Implemented
-  with `date-fns` + `@date-fns/utc` (`{ in: utc }`).
+  we do **not** localize to the clinician's or patient's timezone (since those aren't
+  part of the schema). Implemented with `date-fns` + `@date-fns/utc` (`{ in: utc }`).
 - An assessment's two sessions must be on **different calendar days**, **no more
   than 7 days apart**. "7 days" is **calendar days** (not 7×24 hours) and the
   bound is **inclusive**: booking on a Wednesday surfaces options up to and
@@ -82,20 +78,45 @@
   the greedy's result on the README's own example (no real tie exists there).
   We never enumerate *combinations* of slots (which would be combinatorial) —
   only test each slot's membership in some optimal solution independently.
-- **Continuous sweep, not bucketed by calendar day**, when computing a
-  therapist's single-slot availability (`maximizeSlots`): a slot starting near
-  midnight genuinely overlaps into the next calendar day, and bucketing by day
-  could incorrectly let two really-overlapping slots both survive.
-- **Computed per calendar day (UTC) for assessment pairing**
-  (`maximizeSlotsPerDay`): assessment sessions are required to be on different
-  days, so each day's maximized candidate pool is independent of every other
-  day's — grouping by day here is a safe convenience (not a correctness risk)
-  specifically because the cross-day pairing step that follows never needs two
-  same-day slots to interact with each other.
+- **One `maximizeSlots`, run on the full candidate list (not bucketed by
+  calendar day)**, for both therapy availability and assessment pairing. A
+  per-day-bucketed variant was considered for assessment pairing (sessions
+  must land on different days), but a single global pass is simpler and
+  behaves identically *given* the no-midnight-crossing assumption below — see
+  that bullet for what we'd reconsider if it didn't hold.
 - Maximization runs **after** occupancy filtering (real bookings must be
   removed first — they aren't "candidates" to optimize over) and **before**
-  assessment pairing (which slots survive on one day changes which partners
-  are reachable on another).
+  assessment pairing (which slots survive changes which partners are
+  reachable).
+- **Assumption: no slot crosses midnight** (a slot's `date + length` never
+  spills into the next calendar day) — true for `MOCK_SLOT_DATA` (latest start
+  22:30 UTC, ending exactly at 00:00), but not a derived fact. We explored what
+  a midnight-crossing slot would break (`getAssessmentPairs`' calendar-day-only
+  check letting through a pair that physically overlaps) and added a
+  same-physical-time overlap guard to `getAssessmentPairs` regardless. We
+  didn't generalize further — if midnight-crossing slots become real, that
+  needs product input on intended behavior, not just an engineering fix.
+
+## Robustness / hardening
+
+- **Established-patient statuses** (see "Prior-relationship rule" above): only
+  `UPCOMING` (committed intent) and `OCCURRED` (attended) make someone an
+  established patient. A `NO_SHOW`, `LATE_CANCELLATION`, `CANCELLED`, or
+  `RE_SCHEDULED` means no care relationship actually formed — they never
+  onboarded — so they remain a new-patient (intake/assessment) candidate and
+  cannot book ongoing (`THERAPY_SIXTY_MINS`) sessions.
+- **Duplicate same-timestamp slots** are collapsed to a single offering: a
+  clinician can't hold two appointments starting at the same instant, so
+  `maximizeSlots` dedupes by start time before optimizing.
+- **Slot length must match the service** (90 for assessment, 60 for therapy).
+  A clinician's slot length encodes their type, so a mismatched-length slot is
+  treated as bad data and dropped before scheduling, rather than mis-scheduled
+  under the wrong duration.
+- **Past slots** can be excluded via an optional `now` on the availability
+  entry points: when supplied, slots starting at or before `now` are dropped (a
+  slot already underway can't be booked). It's **off by default** so historical
+  demo data (the README's 2024 slots) is still returned; a real deployment
+  would pass the current time.
 
 ## Data layer
 
