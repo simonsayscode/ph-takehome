@@ -19,31 +19,25 @@ export interface ClinicianTherapyAvailability {
   slots: AvailableAppointmentSlot[];
 }
 
-/** Options shared by the availability entry points. */
-export interface AvailabilityOptions {
-  /**
-   * If provided, slots starting at or before this instant are excluded (a slot
-   * already underway can't be booked). Off by default so historical demo data
-   * (e.g. the README's 2024 slots) is still returned.
-   */
-  now?: Date;
-}
-
 /**
- * Reduces a clinician's candidate slots to every one that's part of some
- * maximum-cardinality non-overlapping selection (see overlap.ts), then maps
- * the surviving timestamps back to their full slot objects. Slots are deduped
- * by start time first — a clinician can't hold two appointments at the same
- * instant, so identical timestamps collapse to a single offerable slot.
+ * Turns a clinician's raw `availableSlots` into the set of bookable slots for a
+ * service: remove slots overlapping existing appointments, then keep only the
+ * overlap-maximizing subset (see overlap.ts), mapping the surviving timestamps
+ * back to their full slot objects. Slots are deduped by start time — a
+ * clinician can't hold two appointments at the same instant, so identical
+ * timestamps collapse to a single offerable slot.
+ *
+ * We trust the README invariant that a clinician's slot length matches their
+ * type (90 = psychologist, 60 = therapist), so we don't re-filter by length.
  */
-function maximizeSlots(
-  slots: AvailableAppointmentSlot[],
+function bookableSlots(
+  clinician: Clinician,
   durationMins: number,
 ): AvailableAppointmentSlot[] {
-  if (slots.length === 0) return [];
+  const unoccupied = filterUnoccupied(clinician.availableSlots, clinician);
 
   const byTimestamp = new Map<number, AvailableAppointmentSlot>();
-  for (const slot of slots) {
+  for (const slot of unoccupied) {
     if (!byTimestamp.has(slot.date.getTime())) byTimestamp.set(slot.date.getTime(), slot);
   }
   const unique = [...byTimestamp.values()];
@@ -51,26 +45,6 @@ function maximizeSlots(
   return filterToMaxAppointments(unique.map((slot) => slot.date), durationMins).map(
     (date) => byTimestamp.get(date.getTime())!,
   );
-}
-
-/**
- * Turns a clinician's raw `availableSlots` into the set of bookable slots for a
- * service: keep only slots of the service's length (a clinician's slot length
- * encodes their type — a mismatched length is bad data we drop), optionally
- * drop slots in the past, remove slots overlapping existing appointments, then
- * keep only the overlap-maximizing subset.
- */
-function prepareSlots(
-  clinician: Clinician,
-  durationMins: number,
-  options: AvailabilityOptions,
-): AvailableAppointmentSlot[] {
-  let slots = clinician.availableSlots.filter((slot) => slot.length === durationMins);
-  if (options.now) {
-    const cutoff = options.now.getTime();
-    slots = slots.filter((slot) => slot.date.getTime() > cutoff);
-  }
-  return maximizeSlots(filterUnoccupied(slots, clinician), durationMins);
 }
 
 /**
@@ -82,7 +56,6 @@ function prepareSlots(
 export async function getAssessmentAvailability(
   patient: Patient,
   repo: ClinicianRepository,
-  options: AvailabilityOptions = {},
 ): Promise<ClinicianAssessmentAvailability[]> {
   const clinicians = await repo.findEligibleClinicians(
     patient,
@@ -94,7 +67,7 @@ export async function getAssessmentAvailability(
   return clinicians
     .map((clinician) => ({
       clinician,
-      pairs: getAssessmentPairs(prepareSlots(clinician, durationMins, options)),
+      pairs: getAssessmentPairs(bookableSlots(clinician, durationMins)),
     }))
     .filter((availability) => availability.pairs.length > 0);
 }
@@ -110,7 +83,6 @@ export async function getTherapyAvailability(
   patient: Patient,
   repo: ClinicianRepository,
   service: Extract<ServiceType, "THERAPY_INTAKE" | "THERAPY_SIXTY_MINS">,
-  options: AvailabilityOptions = {},
 ): Promise<ClinicianTherapyAvailability[]> {
   const clinicians = await repo.findEligibleClinicians(patient, service);
   const durationMins = SERVICE_RULES[service].slotLengthMins;
@@ -118,7 +90,7 @@ export async function getTherapyAvailability(
   return clinicians
     .map((clinician) => ({
       clinician,
-      slots: prepareSlots(clinician, durationMins, options),
+      slots: bookableSlots(clinician, durationMins),
     }))
     .filter((availability) => availability.slots.length > 0);
 }

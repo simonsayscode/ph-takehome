@@ -107,16 +107,20 @@
   cannot book ongoing (`THERAPY_SIXTY_MINS`) sessions.
 - **Duplicate same-timestamp slots** are collapsed to a single offering: a
   clinician can't hold two appointments starting at the same instant, so
-  `maximizeSlots` dedupes by start time before optimizing.
-- **Slot length must match the service** (90 for assessment, 60 for therapy).
-  A clinician's slot length encodes their type, so a mismatched-length slot is
-  treated as bad data and dropped before scheduling, rather than mis-scheduled
-  under the wrong duration.
-- **Past slots** can be excluded via an optional `now` on the availability
-  entry points: when supplied, slots starting at or before `now` are dropped (a
-  slot already underway can't be booked). It's **off by default** so historical
-  demo data (the README's 2024 slots) is still returned; a real deployment
-  would pass the current time.
+  `bookableSlots` dedupes by start time before optimizing.
+- **We trust the README's slot-length invariant** — a 90-min slot means a
+  psychologist, a 60-min slot means a therapist — and pass the service's
+  duration to the maximizer rather than defensively re-filtering each
+  clinician's slots by length. (An earlier version dropped mismatched-length
+  slots as bad data; removed in favor of simpler code that relies on the
+  invariant.)
+- **Past slots are not filtered.** A production system would pass the current
+  time (a `now`) into the availability entry points and exclude slots starting
+  at or before it (a slot already underway can't be booked). We deliberately
+  omit this for the take-home: the demo data is historical (2024), so a real
+  `now` would filter everything out, and threading it through adds parameters
+  without exercising any new business logic. Flagged here as a known,
+  intentional simplification.
 
 ## Data layer
 

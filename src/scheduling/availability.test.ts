@@ -112,11 +112,6 @@ describe("availability hardening", () => {
     updatedAt: new Date(),
   });
 
-  const psychologist = (id: string, slots: AvailableAppointmentSlot[]): Clinician => ({
-    ...therapist(id, slots),
-    clinicianType: "PSYCHOLOGIST",
-  });
-
   it("collapses duplicate same-timestamp slots into a single offering", async () => {
     const id = "dup-therapist";
     const r = new InMemoryClinicianRepository([
@@ -129,48 +124,5 @@ describe("availability hardening", () => {
     const availability = await getTherapyAvailability(patient, r, "THERAPY_INTAKE");
 
     expect(availability[0].slots).toHaveLength(1);
-  });
-
-  it("drops slots whose length doesn't match the service (bad data)", async () => {
-    const id = "mixed-psych";
-    const r = new InMemoryClinicianRepository([
-      psychologist(id, [
-        slot(id, "2024-09-02T16:00:00.000Z", 90),
-        slot(id, "2024-09-03T16:00:00.000Z", 60), // stray 60-min slot for a psychologist
-        slot(id, "2024-09-04T16:00:00.000Z", 90),
-      ]),
-    ]);
-
-    const availability = await getAssessmentAvailability(patient, r);
-    const usedLengths = availability[0].pairs.flatMap((p) => [
-      p.session1.length,
-      p.session2.length,
-    ]);
-    const usedDates = availability[0].pairs.flatMap((p) => [
-      p.session1.date.toISOString(),
-      p.session2.date.toISOString(),
-    ]);
-
-    expect(usedLengths.every((len) => len === 90)).toBe(true);
-    expect(usedDates).not.toContain("2024-09-03T16:00:00.000Z");
-  });
-
-  it("excludes past slots when a `now` cutoff is supplied", async () => {
-    const id = "now-therapist";
-    const r = new InMemoryClinicianRepository([
-      therapist(id, [
-        slot(id, "2024-09-02T15:00:00.000Z", 60),
-        slot(id, "2024-09-03T15:00:00.000Z", 60),
-      ]),
-    ]);
-
-    const availability = await getTherapyAvailability(patient, r, "THERAPY_INTAKE", {
-      now: new Date("2024-09-02T20:00:00.000Z"),
-    });
-
-    expect(availability[0].slots).toHaveLength(1);
-    expect(availability[0].slots[0].date.toISOString()).toBe(
-      "2024-09-03T15:00:00.000Z",
-    );
   });
 });
